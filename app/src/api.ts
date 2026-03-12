@@ -1,4 +1,5 @@
 import type { TableData, TableSummary } from "./types";
+import { auth } from "./firebase";
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL?.replace(/\/$/, "") ?? "";
 
@@ -30,12 +31,32 @@ async function parseJson<T>(response: Response): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+async function buildHeaders(options?: { forceRefresh?: boolean }): Promise<HeadersInit> {
+  if (!apiBaseUrl) {
+    return {};
+  }
+
+  const user = auth.currentUser;
+  if (!user) {
+    return {};
+  }
+
+  const idToken = await user.getIdToken(options?.forceRefresh ?? false);
+  return {
+    Authorization: `Bearer ${idToken}`
+  };
+}
+
 export async function fetchTables(options?: {
   refreshKey?: string;
   forceRefresh?: boolean;
 }): Promise<TableSummary[]> {
+  const headers = await buildHeaders(options);
   const path = apiBaseUrl ? "/api/tables" : "/data/tables.json";
-  const response = await fetch(buildUrl(path, options), { cache: "no-store" });
+  const response = await fetch(buildUrl(path, options), {
+    cache: "no-store",
+    headers
+  });
   return parseJson<TableSummary[]>(response);
 }
 
@@ -43,9 +64,11 @@ export async function fetchTable(
   tableId: string,
   options?: { refreshKey?: string; forceRefresh?: boolean }
 ): Promise<TableData> {
+  const headers = await buildHeaders(options);
   const path = apiBaseUrl ? `/api/tables/${tableId}` : `/data/${tableId}.json`;
   const response = await fetch(buildUrl(path, options), {
-    cache: "no-store"
+    cache: "no-store",
+    headers
   });
   return parseJson<TableData>(response);
 }

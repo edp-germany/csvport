@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
+import {
+  browserLocalPersistence,
+  browserSessionPersistence,
+  onAuthStateChanged,
+  setPersistence,
+  signInWithEmailAndPassword,
+  signOut,
+  type User
+} from "firebase/auth";
 import { fetchTable, fetchTables } from "./api";
+import { auth } from "./firebase";
 import { getVisibleColumns } from "./tableConfig";
 import type { TableData, TableSummary } from "./types";
 
@@ -7,13 +17,54 @@ type LoadState =
   | { status: "idle" | "loading" }
   | { status: "error"; message: string };
 
+type AuthState =
+  | { status: "checking" }
+  | { status: "signed_out" }
+  | { status: "signed_in"; user: User };
+
+type SortState = {
+  column: string;
+  direction: "asc" | "desc";
+};
+
+function parseSortableValue(value: string) {
+  const normalized = value.trim().replace(/\./g, "").replace(",", ".");
+  const asNumber = Number(normalized);
+
+  if (normalized !== "" && !Number.isNaN(asNumber)) {
+    return asNumber;
+  }
+
+  return value.trim().toLowerCase();
+}
+
 function App() {
+  const [authState, setAuthState] = useState<AuthState>({ status: "checking" });
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [rememberLogin, setRememberLogin] = useState(true);
+  const [authError, setAuthError] = useState<string>("");
+  const [authPending, setAuthPending] = useState(false);
   const [tables, setTables] = useState<TableSummary[]>([]);
   const [activeTableId, setActiveTableId] = useState<string>("");
   const [activeTable, setActiveTable] = useState<TableData | null>(null);
   const [search, setSearch] = useState("");
   const [selectedColumn, setSelectedColumn] = useState<string>("__all__");
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
+  const [sortState, setSortState] = useState<SortState | null>(null);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setAuthState({ status: "signed_in", user });
+        return;
+      }
+
+      setAuthState({ status: "signed_out" });
+    });
+
+    return unsubscribe;
+  }, []);
 
   async function loadTables(
     preferredTableId?: string,
@@ -66,8 +117,12 @@ function App() {
   }
 
   useEffect(() => {
+    if (authState.status !== "signed_in") {
+      return;
+    }
+
     void loadTables();
-  }, []);
+  }, [authState.status]);
 
   useEffect(() => {
     if (!activeTableId || activeTable?.id === activeTableId) {
@@ -76,6 +131,7 @@ function App() {
 
     setSelectedColumn("__all__");
     setSearch("");
+    setSortState(null);
     void loadSingleTable(activeTableId);
   }, [activeTableId, activeTable?.id]);
 
@@ -107,6 +163,27 @@ function App() {
     });
   }, [activeTable, search, selectedColumn]);
 
+  const sortedRows = useMemo(() => {
+    if (!sortState) {
+      return filteredRows;
+    }
+
+    return [...filteredRows].sort((leftRow, rightRow) => {
+      const leftValue = parseSortableValue(leftRow[sortState.column] ?? "");
+      const rightValue = parseSortableValue(rightRow[sortState.column] ?? "");
+
+      if (leftValue < rightValue) {
+        return sortState.direction === "asc" ? -1 : 1;
+      }
+
+      if (leftValue > rightValue) {
+        return sortState.direction === "asc" ? 1 : -1;
+      }
+
+      return 0;
+    });
+  }, [filteredRows, sortState]);
+
   const stats = useMemo(() => {
     if (!activeTable) {
       return [];
@@ -128,12 +205,130 @@ function App() {
     ];
   }, [activeTable, tables.length, visibleColumns.length]);
 
+  function toggleSort(column: string) {
+    setSortState((current) => {
+      if (!current || current.column !== column) {
+        return { column, direction: "asc" };
+      }
+
+      if (current.direction === "asc") {
+        return { column, direction: "desc" };
+      }
+
+      return null;
+    });
+  }
+
+  async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setAuthPending(true);
+    setAuthError("");
+
+    try {
+      await setPersistence(
+        auth,
+        rememberLogin ? browserLocalPersistence : browserSessionPersistence
+      );
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (error) {
+      setAuthError(
+        error instanceof Error ? error.message : "Anmeldung fehlgeschlagen."
+      );
+    } finally {
+      setAuthPending(false);
+    }
+  }
+
+  async function handleLogout() {
+    await signOut(auth);
+    setTables([]);
+    setActiveTable(null);
+    setActiveTableId("");
+    setSearch("");
+    setSelectedColumn("__all__");
+    setSortState(null);
+  }
+
+  if (authState.status === "checking") {
+    return (
+      <div className="shell auth-shell">
+        <div className="background-orb background-orb-left" />
+        <div className="background-orb background-orb-right" />
+        <main className="auth-card">
+          <span className="eyebrow">CSVport</span>
+          <h1>Authentifizierung wird geprueft</h1>
+          <p>Bitte einen Moment warten.</p>
+        </main>
+      </div>
+    );
+  }
+
+  if (authState.status === "signed_out") {
+    return (
+      <div className="shell auth-shell">
+        <div className="background-orb background-orb-left" />
+        <div className="background-orb background-orb-right" />
+        <main className="auth-card">
+          <span className="eyebrow">CSVport</span>
+          <h1>Login</h1>
+          <p>Bitte Login-Daten eingeben</p>
+
+          <form className="auth-form" onSubmit={handleLogin}>
+            <label className="input-group">
+              <span>E-Mail</span>
+              <input
+                type="email"
+                value={email}
+                onChange={(event) => setEmail(event.target.value)}
+                required
+                autoComplete="email"
+              />
+            </label>
+
+            <label className="input-group">
+              <span>Passwort</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                required
+                autoComplete="current-password"
+              />
+            </label>
+
+            <label className="remember-login">
+              <input
+                type="checkbox"
+                checked={rememberLogin}
+                onChange={(event) => setRememberLogin(event.target.checked)}
+              />
+              <span>Angemeldet bleiben</span>
+            </label>
+
+            {authError ? <p className="auth-error">{authError}</p> : null}
+
+            <button type="submit" className="refresh-button" disabled={authPending}>
+              {authPending ? "Anmeldung laeuft ..." : "Anmelden"}
+            </button>
+          </form>
+        </main>
+      </div>
+    );
+  }
+
   return (
     <div className="shell">
       <div className="background-orb background-orb-left" />
       <div className="background-orb background-orb-right" />
 
       <header className="hero">
+        <div className="hero-session">
+          <span>{authState.user.email}</span>
+          <button type="button" className="logout-button" onClick={() => void handleLogout()}>
+            Abmelden
+          </button>
+        </div>
+
         <div className="hero-copy">
           <span className="eyebrow">CSV Dashboard</span>
           <h1>CSVport</h1>
@@ -236,11 +431,13 @@ function App() {
         {loadState.status === "idle" && activeTable && tables.length > 0 ? (
           <section className="table-wrap">
             <div className="table-meta">
-              <div>
+              <div className="table-meta-main">
                 <h2>{activeTable.label}</h2>
                 <p>
-                  {filteredRows.length} von {activeTable.rowCount} Zeilen sichtbar
+                  {sortedRows.length} von {activeTable.rowCount} Zeilen sichtbar
                 </p>
+              </div>
+              <div className="table-meta-side">
                 <p className="sync-note">
                   Zuletzt synchronisiert:{" "}
                   {activeTable.updatedAt
@@ -259,11 +456,6 @@ function App() {
                       }).format(new Date(activeTable.ftpModifiedAt))
                     : "Nicht verfuegbar"}
                 </p>
-                <p className="sync-hint">
-                  Der Refresh-Button aktualisiert den zuletzt auf Firebase
-                  bereitgestellten Datenstand. Neue FTP-Daten werden erst nach
-                  erneutem Sync und Deploy sichtbar.
-                </p>
               </div>
             </div>
 
@@ -272,15 +464,32 @@ function App() {
                 <thead>
                   <tr>
                     {visibleColumns.map((column) => (
-                      <th key={column.key}>{column.label}</th>
+                      <th key={column.key} className={column.className}>
+                        <button
+                          type="button"
+                          className="sort-button"
+                          onClick={() => toggleSort(column.key)}
+                        >
+                          <span>{column.label}</span>
+                          <span className="sort-indicator">
+                            {sortState?.column === column.key
+                              ? sortState.direction === "asc"
+                                ? "↑"
+                                : "↓"
+                              : "↕"}
+                          </span>
+                        </button>
+                      </th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredRows.map((row, index) => (
+                  {sortedRows.map((row, index) => (
                     <tr key={`${activeTable.id}-${index}`}>
                       {visibleColumns.map((column) => (
-                        <td key={`${index}-${column.key}`}>{row[column.key] ?? ""}</td>
+                        <td key={`${index}-${column.key}`} className={column.className}>
+                          {row[column.key] ?? ""}
+                        </td>
                       ))}
                     </tr>
                   ))}

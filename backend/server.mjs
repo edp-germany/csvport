@@ -1,5 +1,7 @@
 import { config as loadEnv } from "dotenv";
 import express from "express";
+import { cert, initializeApp } from "firebase-admin/app";
+import { getAuth } from "firebase-admin/auth";
 import { Client } from "basic-ftp";
 import { parse } from "csv-parse/sync";
 import { Writable } from "node:stream";
@@ -23,6 +25,24 @@ function getTableConfigs() {
 
   return parsed;
 }
+
+const firebaseProjectId = process.env.FIREBASE_PROJECT_ID;
+const firebaseClientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+const firebasePrivateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n");
+
+if (!firebaseProjectId || !firebaseClientEmail || !firebasePrivateKey) {
+  throw new Error(
+    "Missing Firebase Admin credentials. Set FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY."
+  );
+}
+
+initializeApp({
+  credential: cert({
+    projectId: firebaseProjectId,
+    clientEmail: firebaseClientEmail,
+    privateKey: firebasePrivateKey
+  })
+});
 
 function normalizeRecord(record) {
   return Object.fromEntries(
@@ -160,7 +180,7 @@ const frontendOrigin = process.env.FRONTEND_ORIGIN ?? "*";
 
 app.use((request, response, next) => {
   response.setHeader("Access-Control-Allow-Origin", frontendOrigin);
-  response.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
   response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
 
   if (request.method === "OPTIONS") {
@@ -171,9 +191,28 @@ app.use((request, response, next) => {
   next();
 });
 
+async function requireAuth(request, response, next) {
+  const authHeader = request.header("authorization");
+
+  if (!authHeader?.startsWith("Bearer ")) {
+    response.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  try {
+    const token = authHeader.slice("Bearer ".length);
+    request.user = await getAuth().verifyIdToken(token);
+    next();
+  } catch (_error) {
+    response.status(401).json({ error: "Unauthorized" });
+  }
+}
+
 app.get("/health", (_request, response) => {
   response.json({ ok: true });
 });
+
+app.use("/api", requireAuth);
 
 app.get("/api/tables", async (request, response) => {
   try {

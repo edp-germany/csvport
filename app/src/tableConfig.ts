@@ -1,6 +1,7 @@
 type ColumnPresentation = {
   key: string;
   label: string;
+  className?: string;
 };
 
 type TablePresentation = {
@@ -10,12 +11,12 @@ type TablePresentation = {
 const tablePresentation: Record<string, TablePresentation> = {
   eparts: {
     columns: [
-      { key: "PART NUMBER", label: "Artikelnummer" },
-      { key: "DESIGNATION 1", label: "Bezeichnung" },
-      { key: "EAN CODE", label: "EAN" },
-      { key: "BRAND", label: "Marke" },
-      { key: "STOCK", label: "Bestand" },
-      { key: "PRICE", label: "Preis" }
+      { key: "PART NUMBER", label: "Artikelnummer", className: "column-sku" },
+      { key: "DESIGNATION 1", label: "Bezeichnung", className: "column-title" },
+      { key: "EAN CODE", label: "EAN", className: "column-ean" },
+      { key: "BRAND", label: "Marke", className: "column-brand" },
+      { key: "STOCK", label: "Bestand", className: "column-stock" },
+      { key: "PRICE", label: "Preis", className: "column-price" }
     ]
   }
 };

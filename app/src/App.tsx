@@ -8,7 +8,7 @@ import {
   signOut,
   type User
 } from "firebase/auth";
-import { fetchTable, fetchTables } from "./api";
+import { fetchRefreshStatus, fetchTable, fetchTables } from "./api";
 import { auth } from "./firebase";
 import { getVisibleColumns } from "./tableConfig";
 import type { TableData, TableSummary } from "./types";
@@ -38,6 +38,16 @@ function parseSortableValue(value: string) {
   return value.trim().toLowerCase();
 }
 
+function formatExportTimestamp(date: Date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+
+  return `${year}-${month}-${day}_${hours}-${minutes}`;
+}
+
 function App() {
   const [authState, setAuthState] = useState<AuthState>({ status: "checking" });
   const [email, setEmail] = useState("");
@@ -52,6 +62,10 @@ function App() {
   const [selectedColumn, setSelectedColumn] = useState<string>("__all__");
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
   const [sortState, setSortState] = useState<SortState | null>(null);
+  const [copiedCell, setCopiedCell] = useState<string>("");
+  const [exportPending, setExportPending] = useState<"" | "csv" | "xlsx">("");
+  const [loadingSeconds, setLoadingSeconds] = useState(0);
+  const [loadingMessage, setLoadingMessage] = useState("Daten werden vorbereitet");
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -135,6 +149,41 @@ function App() {
     void loadSingleTable(activeTableId);
   }, [activeTableId, activeTable?.id]);
 
+  useEffect(() => {
+    if (loadState.status !== "loading") {
+      setLoadingSeconds(0);
+      return;
+    }
+
+    const startedAt = Date.now();
+    const intervalId = window.setInterval(() => {
+      setLoadingSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    }, 250);
+
+    return () => window.clearInterval(intervalId);
+  }, [loadState.status]);
+
+  useEffect(() => {
+    if (loadState.status !== "loading") {
+      setLoadingMessage("Daten werden vorbereitet");
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void fetchRefreshStatus()
+        .then((status) => {
+          if (status.message) {
+            setLoadingMessage(status.message);
+          }
+        })
+        .catch(() => {
+          setLoadingMessage("Daten werden vorbereitet");
+        });
+    }, 1200);
+
+    return () => window.clearInterval(intervalId);
+  }, [loadState.status]);
+
   const visibleColumns = useMemo(() => {
     if (!activeTable) {
       return [];
@@ -217,6 +266,88 @@ function App() {
 
       return null;
     });
+  }
+
+  async function handleCopyCell(value: string) {
+    if (!value) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopiedCell(value);
+      window.setTimeout(() => setCopiedCell(""), 1600);
+    } catch (_error) {
+      setCopiedCell("");
+    }
+  }
+
+  async function loadXlsx() {
+    return import("xlsx");
+  }
+
+  async function handleExportXlsx() {
+    if (!activeTable) {
+      return;
+    }
+
+    setExportPending("xlsx");
+
+    try {
+      const exportRows = sortedRows.map((row) =>
+        Object.fromEntries(
+          visibleColumns.map((column) => [column.label, row[column.key] ?? ""])
+        )
+      );
+
+      const XLSX = await loadXlsx();
+      const workbook = XLSX.utils.book_new();
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      worksheet["!cols"] = visibleColumns.map((column) => {
+        const longestValue = exportRows.reduce((max, row) => {
+          const cellValue = String(row[column.label] ?? "");
+          return Math.max(max, cellValue.length);
+        }, column.label.length);
+
+        return { wch: Math.min(Math.max(longestValue + 2, 12), 48) };
+      });
+      XLSX.utils.book_append_sheet(workbook, worksheet, activeTable.label);
+      XLSX.writeFile(
+        workbook,
+        `${activeTable.id}-${formatExportTimestamp(new Date())}.xlsx`
+      );
+    } finally {
+      setExportPending("");
+    }
+  }
+
+  async function handleExportCsv() {
+    if (!activeTable) {
+      return;
+    }
+
+    setExportPending("csv");
+
+    try {
+      const exportRows = sortedRows.map((row) =>
+        Object.fromEntries(
+          visibleColumns.map((column) => [column.label, row[column.key] ?? ""])
+        )
+      );
+
+      const XLSX = await loadXlsx();
+      const worksheet = XLSX.utils.json_to_sheet(exportRows);
+      const csv = XLSX.utils.sheet_to_csv(worksheet, { FS: ";", RS: "\n" });
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${activeTable.id}-${formatExportTimestamp(new Date())}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setExportPending("");
+    }
   }
 
   async function handleLogin(event: React.FormEvent<HTMLFormElement>) {
@@ -376,6 +507,24 @@ function App() {
               Daten neu laden
             </button>
 
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={handleExportCsv}
+              disabled={!activeTable || sortedRows.length === 0 || exportPending !== ""}
+            >
+              {exportPending === "csv" ? "CSV wird erstellt ..." : "CSV exportieren"}
+            </button>
+
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={handleExportXlsx}
+              disabled={!activeTable || sortedRows.length === 0 || exportPending !== ""}
+            >
+              {exportPending === "xlsx" ? "XLSX wird erstellt ..." : "XLSX exportieren"}
+            </button>
+
             <label className="input-group">
               <span>Suche</span>
               <input
@@ -414,7 +563,14 @@ function App() {
         {loadState.status === "loading" ? (
           <section className="empty-state">
             <h2>Daten werden geladen</h2>
-            <p>Die CSV wird aus dem Backend vorbereitet und angezeigt.</p>
+            <p className="loading-note-strong">{loadingMessage}</p>
+            <p>
+              Die CSV wird gerade vom Backend geladen. Nach einer Render-Ruhezeit
+              kann der erste Abruf etwas laenger dauern.
+            </p>
+            {loadingSeconds > 0 ? (
+              <p className="loading-note">Aktueller Abruf laeuft seit {loadingSeconds}s</p>
+            ) : null}
           </section>
         ) : null}
 
@@ -487,8 +643,13 @@ function App() {
                   {sortedRows.map((row, index) => (
                     <tr key={`${activeTable.id}-${index}`}>
                       {visibleColumns.map((column) => (
-                        <td key={`${index}-${column.key}`} className={column.className}>
-                          {row[column.key] ?? ""}
+                        <td
+                          key={`${index}-${column.key}`}
+                          className={column.className}
+                          onClick={() => void handleCopyCell(row[column.key] ?? "")}
+                          title="Klicken zum Kopieren"
+                        >
+                          <span className="cell-value">{row[column.key] ?? ""}</span>
                         </td>
                       ))}
                     </tr>
@@ -499,6 +660,8 @@ function App() {
           </section>
         ) : null}
       </main>
+
+      {copiedCell ? <div className="copy-toast">Kopiert</div> : null}
     </div>
   );
 }

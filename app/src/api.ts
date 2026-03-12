@@ -72,3 +72,17 @@ export async function fetchTable(
   });
   return parseJson<TableData>(response);
 }
+
+export async function fetchRefreshStatus(): Promise<{
+  phase: string;
+  message: string;
+  startedAt: string | null;
+  updatedAt: string | null;
+}> {
+  const headers = await buildHeaders();
+  const response = await fetch(buildUrl("/api/status"), {
+    cache: "no-store",
+    headers
+  });
+  return parseJson(response);
+}

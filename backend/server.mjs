@@ -123,6 +123,7 @@ async function fetchAllTables() {
   client.ftp.verbose = false;
 
   try {
+    setRefreshStatus("connecting", "FTP-Verbindung wird aufgebaut");
     await client.access({
       host: requireEnv("FTP_HOST"),
       port: Number(process.env.FTP_PORT ?? "21"),
@@ -133,6 +134,7 @@ async function fetchAllTables() {
 
     const tables = [];
     for (const tableConfig of getTableConfigs()) {
+      setRefreshStatus("fetching", `CSV wird geladen: ${tableConfig.label}`);
       tables.push(await fetchTable(client, tableConfig));
     }
 
@@ -148,22 +150,46 @@ let cache = {
   fetchedAt: null
 };
 
-async function refreshCache() {
-  const tables = await fetchAllTables();
-  cache = {
-    tables: tables.map((table) => ({
-      id: table.id,
-      label: table.label,
-      columns: table.columns,
-      rowCount: table.rowCount,
-      updatedAt: table.updatedAt,
-      ftpModifiedAt: table.ftpModifiedAt
-    })),
-    byId: new Map(tables.map((table) => [table.id, table])),
-    fetchedAt: new Date().toISOString()
-  };
+let refreshStatus = {
+  phase: "idle",
+  message: "Bereit",
+  startedAt: null,
+  updatedAt: null
+};
 
-  return cache;
+function setRefreshStatus(phase, message) {
+  refreshStatus = {
+    phase,
+    message,
+    startedAt: phase === "idle" ? null : refreshStatus.startedAt ?? new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+}
+
+async function refreshCache() {
+  try {
+    setRefreshStatus("starting", "Backend startet");
+    const tables = await fetchAllTables();
+    setRefreshStatus("processing", "Daten werden aufbereitet");
+    cache = {
+      tables: tables.map((table) => ({
+        id: table.id,
+        label: table.label,
+        columns: table.columns,
+        rowCount: table.rowCount,
+        updatedAt: table.updatedAt,
+        ftpModifiedAt: table.ftpModifiedAt
+      })),
+      byId: new Map(tables.map((table) => [table.id, table])),
+      fetchedAt: new Date().toISOString()
+    };
+
+    setRefreshStatus("idle", "Bereit");
+    return cache;
+  } catch (error) {
+    setRefreshStatus("error", error instanceof Error ? error.message : "Refresh fehlgeschlagen");
+    throw error;
+  }
 }
 
 async function ensureCache() {
@@ -213,6 +239,10 @@ app.get("/health", (_request, response) => {
 });
 
 app.use("/api", requireAuth);
+
+app.get("/api/status", (_request, response) => {
+  response.json(refreshStatus);
+});
 
 app.get("/api/tables", async (request, response) => {
   try {

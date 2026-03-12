@@ -1,0 +1,15 @@
+{
+  "name": "csvport",
+  "private": true,
+  "workspaces": [
+    "app",
+    "functions"
+  ],
+  "scripts": {
+    "sync:data": "node functions/scripts/sync-static.mjs",
+    "build": "npm run build -w app",
+    "dev": "npm run dev -w app",
+    "lint": "npm run lint -w app",
+    "typecheck": "npm run typecheck -w app"
+  }
+}

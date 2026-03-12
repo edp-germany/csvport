@@ -1,0 +1,8 @@
+node_modules
+dist
+.firebase
+.env
+.env.local
+functions/lib
+app/dist
+coverage

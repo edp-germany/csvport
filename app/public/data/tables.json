@@ -1,0 +1,19 @@
+[
+  {
+    "id": "eparts",
+    "label": "eparts",
+    "columns": [
+      "PART NUMBER",
+      "DESIGNATION 1",
+      "DESIGNATION 2",
+      "EAN CODE",
+      "BRAND",
+      "STOCK",
+      "RESTOCK DATE",
+      "PRICE"
+    ],
+    "rowCount": 1910,
+    "updatedAt": "2026-03-12T10:16:44.765Z",
+    "ftpModifiedAt": "2026-03-12T03:37:11.000Z"
+  }
+]

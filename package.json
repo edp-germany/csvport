@@ -3,11 +3,13 @@
   "private": true,
   "workspaces": [
     "app",
+    "backend",
     "functions"
   ],
   "scripts": {
     "sync:data": "node functions/scripts/sync-static.mjs",
     "build": "npm run build -w app",
+    "build:backend": "npm run build -w backend",
     "dev": "npm run dev -w app",
     "lint": "npm run lint -w app",
     "typecheck": "npm run typecheck -w app"

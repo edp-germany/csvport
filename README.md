@@ -61,5 +61,41 @@ Das Firebase-Projekt `csvport` ist bereits in [.firebaserc](/Users/kkruse/Docume
 Fuer deine aktuelle Tabelle ist `CSV_TABLES`:
 
 ```json
-[{"id":"eparts","label":"eparts","path":"edp-pricelist.csv","delimiter":",","refreshMinutes":30}]
+[{"id":"eparts","label":"eparts","path":"edp-pricelist.csv","delimiter":";","refreshMinutes":30}]
+```
+
+## Render Backend
+
+Wenn der Refresh-Button live per FTP aktualisieren soll, laeuft dafuer ein kleines Backend auf Render.
+
+Render-Service:
+
+- Service-Typ: `Web Service`
+- Runtime: `Node`
+- Root Directory: `backend`
+- Build Command: `npm install`
+- Start Command: `npm start`
+
+Environment Variables in Render:
+
+- `FTP_HOST`
+- `FTP_PORT`
+- `FTP_USER`
+- `FTP_PASSWORD`
+- `FTP_SECURE`
+- `CSV_TABLES`
+- `FRONTEND_ORIGIN`
+
+`FRONTEND_ORIGIN` sollte spaeter auf deine Firebase-URL zeigen, zum Beispiel `https://csvport.web.app`.
+
+Sobald Render live ist, baust du das Frontend mit:
+
+```bash
+VITE_API_BASE_URL=https://dein-render-service.onrender.com npm run build
+```
+
+Danach:
+
+```bash
+firebase deploy --only hosting
 ```

@@ -15,10 +15,13 @@ function App() {
   const [selectedColumn, setSelectedColumn] = useState<string>("__all__");
   const [loadState, setLoadState] = useState<LoadState>({ status: "loading" });
 
-  async function loadTables(preferredTableId?: string, refreshKey?: string) {
+  async function loadTables(
+    preferredTableId?: string,
+    options?: { refreshKey?: string; forceRefresh?: boolean }
+  ) {
     try {
       setLoadState({ status: "loading" });
-      const nextTables = await fetchTables(refreshKey);
+      const nextTables = await fetchTables(options);
       setTables(nextTables);
 
       if (nextTables.length === 0) {
@@ -34,7 +37,7 @@ function App() {
           : nextTables[0].id;
 
       setActiveTableId(nextActiveTableId);
-      const nextTable = await fetchTable(nextActiveTableId, refreshKey);
+      const nextTable = await fetchTable(nextActiveTableId, options);
       setActiveTable(nextTable);
       setLoadState({ status: "idle" });
     } catch (error) {
@@ -45,10 +48,13 @@ function App() {
     }
   }
 
-  async function loadSingleTable(tableId: string, refreshKey?: string) {
+  async function loadSingleTable(
+    tableId: string,
+    options?: { refreshKey?: string; forceRefresh?: boolean }
+  ) {
     try {
       setLoadState({ status: "loading" });
-      const nextTable = await fetchTable(tableId, refreshKey);
+      const nextTable = await fetchTable(tableId, options);
       setActiveTable(nextTable);
       setLoadState({ status: "idle" });
     } catch (error) {
@@ -165,7 +171,12 @@ function App() {
             <button
               type="button"
               className="refresh-button"
-              onClick={() => void loadTables(activeTableId, String(Date.now()))}
+              onClick={() =>
+                void loadTables(activeTableId, {
+                  refreshKey: String(Date.now()),
+                  forceRefresh: true
+                })
+              }
             >
               Daten neu laden
             </button>

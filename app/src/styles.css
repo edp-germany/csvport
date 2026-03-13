@@ -386,7 +386,9 @@ td {
 }
 
 .cell-value {
-  display: block;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
 
 tbody tr:hover {
@@ -410,6 +412,10 @@ tbody tr:hover {
 .sort-indicator {
   flex: 0 0 auto;
   color: var(--muted);
+}
+
+.column-actions {
+  width: 120px;
 }
 
 .column-sku {
@@ -446,6 +452,100 @@ tbody tr:hover {
   background: rgba(0, 51, 153, 0.92);
   color: white;
   box-shadow: 0 14px 30px rgba(0, 51, 153, 0.26);
+}
+
+.details-button {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--brand-deep);
+  cursor: pointer;
+}
+
+.pagination {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  color: var(--muted);
+}
+
+.pagination-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(10, 17, 38, 0.36);
+  backdrop-filter: blur(8px);
+}
+
+.modal-card {
+  width: min(860px, 100%);
+  max-height: 85vh;
+  overflow: auto;
+  padding: 24px;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--shadow);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: start;
+  margin-bottom: 20px;
+}
+
+.modal-header h2 {
+  margin: 10px 0 0;
+}
+
+.detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.detail-item {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: #f8fbff;
+  border: 1px solid rgba(0, 51, 153, 0.08);
+}
+
+.detail-item span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.detail-item strong {
+  font-weight: 600;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.change-indicator {
+  font-weight: 800;
+}
+
+.change-good {
+  color: #128045;
+}
+
+.change-bad {
+  color: #b42318;
 }
 
 .empty-state {
@@ -491,6 +591,10 @@ tbody tr:hover {
   }
 
   .stats-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .detail-grid {
     grid-template-columns: 1fr;
   }
 

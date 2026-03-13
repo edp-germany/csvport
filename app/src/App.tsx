@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import {
   browserLocalPersistence,
   browserSessionPersistence,
@@ -27,6 +27,8 @@ type SortState = {
   direction: "asc" | "desc";
 };
 
+const PAGE_SIZE = 100;
+
 function parseSortableValue(value: string) {
   const normalized = value.trim().replace(/\./g, "").replace(",", ".");
   const asNumber = Number(normalized);
@@ -48,6 +50,26 @@ function formatExportTimestamp(date: Date) {
   return `${year}-${month}-${day}_${hours}-${minutes}`;
 }
 
+function getChangeAppearance(columnKey: string, direction?: "up" | "down") {
+  if (!direction) {
+    return null;
+  }
+
+  if (columnKey === "PRICE") {
+    return direction === "down"
+      ? { arrow: "↓", className: "change-good" }
+      : { arrow: "↑", className: "change-bad" };
+  }
+
+  if (columnKey === "STOCK") {
+    return direction === "up"
+      ? { arrow: "↑", className: "change-good" }
+      : { arrow: "↓", className: "change-bad" };
+  }
+
+  return null;
+}
+
 function App() {
   const [authState, setAuthState] = useState<AuthState>({ status: "checking" });
   const [email, setEmail] = useState("");
@@ -66,6 +88,9 @@ function App() {
   const [exportPending, setExportPending] = useState<"" | "csv" | "xlsx">("");
   const [loadingSeconds, setLoadingSeconds] = useState(0);
   const [loadingMessage, setLoadingMessage] = useState("Daten werden vorbereitet");
+  const [page, setPage] = useState(1);
+  const [selectedRow, setSelectedRow] = useState<Record<string, string> | null>(null);
+  const deferredSearch = useDeferredValue(search);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -146,6 +171,8 @@ function App() {
     setSelectedColumn("__all__");
     setSearch("");
     setSortState(null);
+    setPage(1);
+    setSelectedRow(null);
     void loadSingleTable(activeTableId);
   }, [activeTableId, activeTable?.id]);
 
@@ -197,7 +224,7 @@ function App() {
       return [];
     }
 
-    const term = search.trim().toLowerCase();
+    const term = deferredSearch.trim().toLowerCase();
     if (!term) {
       return activeTable.rows;
     }
@@ -210,7 +237,7 @@ function App() {
 
       return values.some((value) => value.toLowerCase().includes(term));
     });
-  }, [activeTable, search, selectedColumn]);
+  }, [activeTable, deferredSearch, selectedColumn]);
 
   const sortedRows = useMemo(() => {
     if (!sortState) {
@@ -232,6 +259,22 @@ function App() {
       return 0;
     });
   }, [filteredRows, sortState]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [deferredSearch, selectedColumn, sortState, activeTable?.id]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedRows.length / PAGE_SIZE));
+  const paginatedRows = useMemo(() => {
+    const startIndex = (page - 1) * PAGE_SIZE;
+    return sortedRows.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [page, sortedRows]);
+
+  useEffect(() => {
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
 
   const stats = useMemo(() => {
     if (!activeTable) {
@@ -461,9 +504,8 @@ function App() {
         </div>
 
         <div className="hero-copy">
-          <span className="eyebrow">CSV Dashboard</span>
+          <span className="eyebrow">Abruf von CSV-Dateien via FTP</span>
           <h1>CSVport</h1>
-          <p>Abruf von CSV-Dateien via FTP</p>
         </div>
 
         <div className="stats-grid">
@@ -612,6 +654,15 @@ function App() {
                       }).format(new Date(activeTable.ftpModifiedAt))
                     : "Nicht verfuegbar"}
                 </p>
+                {activeTable.comparisonBaselineFtpModifiedAt ? (
+                  <p className="sync-note">
+                    Vergleichsbasis:{" "}
+                    {new Intl.DateTimeFormat("de-DE", {
+                      dateStyle: "medium",
+                      timeStyle: "short"
+                    }).format(new Date(activeTable.comparisonBaselineFtpModifiedAt))}
+                  </p>
+                ) : null}
               </div>
             </div>
 
@@ -637,10 +688,11 @@ function App() {
                         </button>
                       </th>
                     ))}
+                    <th className="column-actions">Details</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedRows.map((row, index) => (
+                  {paginatedRows.map((row, index) => (
                     <tr key={`${activeTable.id}-${index}`}>
                       {visibleColumns.map((column) => (
                         <td
@@ -649,19 +701,100 @@ function App() {
                           onClick={() => void handleCopyCell(row[column.key] ?? "")}
                           title="Klicken zum Kopieren"
                         >
-                          <span className="cell-value">{row[column.key] ?? ""}</span>
+                          <span className="cell-value">
+                            {row[column.key] ?? ""}
+                            {activeTable.comparisonKey ? (() => {
+                              const rowKey = row[activeTable.comparisonKey];
+                              const direction = rowKey
+                                ? activeTable.rowChanges[rowKey]?.[column.key]
+                                : undefined;
+                              const appearance = getChangeAppearance(column.key, direction);
+
+                              return appearance ? (
+                                <span className={`change-indicator ${appearance.className}`}>
+                                  {appearance.arrow}
+                                </span>
+                              ) : null;
+                            })() : null}
+                          </span>
                         </td>
                       ))}
+                      <td className="column-actions">
+                        <button
+                          type="button"
+                          className="details-button"
+                          onClick={() => setSelectedRow(row)}
+                        >
+                          Details
+                        </button>
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+
+            <div className="pagination">
+              <span>
+                Seite {page} von {totalPages}
+              </span>
+              <span>
+                {Math.min((page - 1) * PAGE_SIZE + 1, sortedRows.length)}-
+                {Math.min(page * PAGE_SIZE, sortedRows.length)} von {sortedRows.length}
+              </span>
+              <div className="pagination-actions">
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setPage((current) => Math.max(1, current - 1))}
+                  disabled={page === 1}
+                >
+                  Zurueck
+                </button>
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                  disabled={page === totalPages}
+                >
+                  Weiter
+                </button>
+              </div>
             </div>
           </section>
         ) : null}
       </main>
 
       {copiedCell ? <div className="copy-toast">Kopiert</div> : null}
+
+      {selectedRow && activeTable ? (
+        <div className="modal-backdrop" onClick={() => setSelectedRow(null)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <span className="eyebrow">Detailansicht</span>
+                <h2>{activeTable.label}</h2>
+              </div>
+              <button
+                type="button"
+                className="logout-button"
+                onClick={() => setSelectedRow(null)}
+              >
+                Schliessen
+              </button>
+            </div>
+
+            <div className="detail-grid">
+              {activeTable.columns.map((column) => (
+                <div key={column} className="detail-item">
+                  <span>{column}</span>
+                  <strong>{selectedRow[column] || "—"}</strong>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -50,6 +50,73 @@ function normalizeRecord(record) {
   );
 }
 
+const comparisonConfig = {
+  eparts: {
+    keyColumn: "PART NUMBER",
+    trackedColumns: ["PRICE", "STOCK"]
+  }
+};
+
+function parseComparableNumber(value) {
+  const normalized = String(value ?? "")
+    .trim()
+    .replace(/\./g, "")
+    .replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function computeRowChanges(previousTable, nextTable) {
+  const config = comparisonConfig[nextTable.id];
+  if (!config) {
+    return {
+      comparisonKey: null,
+      comparisonBaselineFtpModifiedAt: null,
+      rowChanges: {}
+    };
+  }
+
+  const previousByKey = new Map(
+    previousTable.rows
+      .map((row) => [row[config.keyColumn], row])
+      .filter(([key]) => typeof key === "string" && key !== "")
+  );
+
+  const rowChanges = {};
+
+  for (const row of nextTable.rows) {
+    const rowKey = row[config.keyColumn];
+    const previousRow = previousByKey.get(rowKey);
+
+    if (!rowKey || !previousRow) {
+      continue;
+    }
+
+    const changes = {};
+
+    for (const trackedColumn of config.trackedColumns) {
+      const previousValue = parseComparableNumber(previousRow[trackedColumn]);
+      const nextValue = parseComparableNumber(row[trackedColumn]);
+
+      if (previousValue == null || nextValue == null || previousValue === nextValue) {
+        continue;
+      }
+
+      changes[trackedColumn] = nextValue > previousValue ? "up" : "down";
+    }
+
+    if (Object.keys(changes).length > 0) {
+      rowChanges[rowKey] = changes;
+    }
+  }
+
+  return {
+    comparisonKey: config.keyColumn,
+    comparisonBaselineFtpModifiedAt: previousTable.ftpModifiedAt ?? null,
+    rowChanges
+  };
+}
+
 function detectDelimiter(csv, fallbackDelimiter) {
   if (fallbackDelimiter) {
     return fallbackDelimiter;
@@ -111,6 +178,9 @@ async function fetchTable(client, tableConfig) {
     id: tableConfig.id,
     label: tableConfig.label,
     columns,
+    comparisonKey: null,
+    comparisonBaselineFtpModifiedAt: null,
+    rowChanges: {},
     rows,
     rowCount: rows.length,
     updatedAt: new Date().toISOString(),
@@ -171,8 +241,32 @@ async function refreshCache() {
     setRefreshStatus("starting", "Backend startet");
     const tables = await fetchAllTables();
     setRefreshStatus("processing", "Daten werden aufbereitet");
+
+    const enrichedTables = tables.map((table) => {
+      const previousTable = cache.byId.get(table.id);
+
+      if (!previousTable) {
+        return table;
+      }
+
+      if (previousTable.ftpModifiedAt && previousTable.ftpModifiedAt === table.ftpModifiedAt) {
+        return {
+          ...table,
+          comparisonKey: previousTable.comparisonKey ?? null,
+          comparisonBaselineFtpModifiedAt:
+            previousTable.comparisonBaselineFtpModifiedAt ?? null,
+          rowChanges: previousTable.rowChanges ?? {}
+        };
+      }
+
+      return {
+        ...table,
+        ...computeRowChanges(previousTable, table)
+      };
+    });
+
     cache = {
-      tables: tables.map((table) => ({
+      tables: enrichedTables.map((table) => ({
         id: table.id,
         label: table.label,
         columns: table.columns,
@@ -180,7 +274,7 @@ async function refreshCache() {
         updatedAt: table.updatedAt,
         ftpModifiedAt: table.ftpModifiedAt
       })),
-      byId: new Map(tables.map((table) => [table.id, table])),
+      byId: new Map(enrichedTables.map((table) => [table.id, table])),
       fetchedAt: new Date().toISOString()
     };
 
